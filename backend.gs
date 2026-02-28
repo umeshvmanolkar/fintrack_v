@@ -154,6 +154,8 @@ function doGet(e) {
 // POST REQUEST HANDLER
 function doPost(e) {
   try {
+    initSheets(); // Ensure headers exist before writing anything
+
     // Use proper CORS header handling to avoid typical web app issues
     const rawData = e.postData.contents;
     const body = JSON.parse(rawData);
@@ -170,6 +172,7 @@ function doPost(e) {
           const existing = usersData.find(u => String(u.email).toLowerCase() === String(payload.email).toLowerCase());
           if (existing) throw new Error("Email already registered");
           
+          payload.id = Utilities.getUuid(); // Auto-generate an ID
           payload.password = Utilities.base64Encode(payload.password); // Apps Script native base64
           payload.createdAt = new Date().toISOString();
           result = appendRow('Users', payload);
