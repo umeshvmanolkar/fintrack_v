@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinTrack - Vanilla App</title>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+
+    <div class="flex" style="min-height: 100vh;">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header flex items-center gap-3">
+                <div class="logo-box flex items-center justify-center">
+                    <i data-lucide="layers" style="color: white; width: 24px;"></i>
+                </div>
+                <h2>FinTrack</h2>
+            </div>
+
+            <nav class="sidebar-nav flex-col gap-2">
+                <a href="#" class="nav-link active" id="nav-earnings" onclick="app.switchTab('earnings')">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Earnings</span>
+                </a>
+                <a href="#" class="nav-link" id="nav-loans" onclick="app.switchTab('loans')">
+                    <i data-lucide="wallet-cards"></i>
+                    <span>Loans</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer border-t">
+                <button class="btn-logout flex items-center gap-4">
+                    <i data-lucide="log-out"></i>
+                    <span>Logout</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="app-content">
+            <!-- Dynamic Content Injected Here by app.js -->
+        </main>
+    </div>
+
+    <!-- Modals Container (Hidden by default) -->
+    <div id="modal-container" class="modal-overlay hidden">
+        <div class="modal-content card" id="dynamic-modal">
+            <!-- Form injected here dynamically -->
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script src="app.js"></script>
+</body>
+
+</html>
