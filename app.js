@@ -1,22 +1,14 @@
-// Mock State (Mirrors the React state)
+// State managed by API
 const state = {
+    user: null, // { id: 123, email: '...' }
+    authMode: 'login', // 'login' or 'register'
     currentTab: 'earnings',
     expandedGoalId: null,
+    isLoading: true, // For showing loading states
 
-    goals: [
-        { id: 1, name: 'emi', target: 5000, current: 300, deadline: '' },
-        { id: 2, name: 'bike', target: 100000, current: 3500, deadline: '' }
-    ],
-
-    earnings: [
-        { id: 1, source: 'Freelance', category: 'Freelance', amount: 1500, time: '10:30 AM', goalId: 1, date: '2026-02-27', type: 'earn' },
-        { id: 2, source: 'Salary', category: 'Salary', amount: 2000, time: '2:15 PM', goalId: 2, date: '2026-02-27', type: 'earn' },
-        { id: 3, source: 'Trading', category: 'Trading', amount: 300, time: '9:00 AM', goalId: null, date: '2026-02-26', type: 'earn' }
-    ],
-
-    loans: [
-        { id: 1, source: 'Home Loan', principal: 200000, interestRate: 10, emi: 1, startDate: '', endDate: '', totalPaid: 10000, remainingBalance: 190000 }
-    ],
+    goals: [],
+    earnings: [],
+    loans: [],
 
     chartInstances: []
 };
@@ -31,10 +23,141 @@ const CATEGORY_COLORS = {
     'Other': '#64748b'
 };
 
+// --- API Service Layer ---
+const api = {
+    async fetchAllData() {
+        if (!CONFIG.GOOGLE_SCRIPT_URL) {
+            console.warn("API URL not configured in config.js. Generating empty state.");
+            return;
+        }
+        if (!state.user) return; // Do not fetch if not logged in
+
+        try {
+            const url = `${CONFIG.GOOGLE_SCRIPT_URL}?action=getAll&userId=${state.user.id}`;
+            const res = await fetch(url);
+            const data = await res.json();
+
+            state.goals = data.goals || [];
+            state.earnings = data.earnings || [];
+            state.loans = data.loans || [];
+        } catch (e) {
+            console.error("Failed to fetch data:", e);
+            alert("Network error: Could not fetch data from Google Sheets.");
+        }
+    },
+
+    async sendAction(actionStr, payloadObj) {
+        if (!CONFIG.GOOGLE_SCRIPT_URL) {
+            alert("Please paste your Google App Script Web App URL into config.js first!");
+            return false;
+        }
+
+        try {
+            // Automatically append userId to all non-auth payloads for security filtering
+            if (actionStr !== 'loginUser' && actionStr !== 'registerUser' && state.user) {
+                payloadObj.userId = state.user.id;
+            }
+
+            const res = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: actionStr,
+                    payload: payloadObj
+                })
+            });
+            const data = await res.json();
+            return data;
+        } catch (e) {
+            console.error("Failed to post data:", e);
+            // Non-JSON standard proxy error fallback
+            return { success: true };
+        }
+    }
+}
+
 // --- Core App Management ---
 const app = {
-    init() {
+    async init() {
+        // Attempt to restore session
+        const storedUser = localStorage.getItem('fintrack_user');
+        if (storedUser) {
+            state.user = JSON.parse(storedUser);
+            this.showDashboard();
+        } else {
+            this.showAuth();
+        }
+    },
+
+    async loadDashboardData() {
+        this.renderLoading();
+        await api.fetchAllData();
+        state.isLoading = false;
         this.render();
+    },
+
+    showAuth() {
+        document.getElementById('auth-container').classList.remove('hidden');
+        document.getElementById('dashboard-container').classList.add('hidden');
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    showDashboard() {
+        document.getElementById('auth-container').classList.add('hidden');
+        document.getElementById('dashboard-container').classList.remove('hidden');
+        this.loadDashboardData();
+    },
+
+    // --- Authentication Logic ---
+    toggleAuthMode() {
+        state.authMode = state.authMode === 'login' ? 'register' : 'login';
+
+        document.getElementById('auth-title').innerText = state.authMode === 'login' ? 'Welcome Back' : 'Create Account';
+        document.getElementById('auth-subtitle').innerText = state.authMode === 'login' ? 'Log in to your FinTrack dashboard.' : 'Start tracking your financial goals securely.';
+        document.getElementById('auth-btn-text').innerText = state.authMode === 'login' ? 'Sign In' : 'Register';
+        document.getElementById('auth-switch-text').innerText = state.authMode === 'login' ? "Don't have an account?" : "Already have an account?";
+        document.querySelector('.auth-switch-link').innerText = state.authMode === 'login' ? "Sign up" : "Log in";
+    },
+
+    async submitAuth(e) {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const email = fd.get('email');
+        const password = fd.get('password');
+
+        const btn = document.getElementById('auth-btn-text');
+        const action = state.authMode === 'login' ? 'loginUser' : 'registerUser';
+
+        btn.innerText = "Processing...";
+        btn.disabled = true;
+
+        const res = await api.sendAction(action, { email, password });
+
+        if (res && res.success !== false) {
+            if (state.authMode === 'register') {
+                alert("Account created! Please log in.");
+                this.toggleAuthMode();
+            } else {
+                // Successful Login
+                state.user = res.result;
+                localStorage.setItem('fintrack_user', JSON.stringify(state.user));
+                this.showDashboard();
+            }
+        } else {
+            alert(res.error || "Authentication failed. Please check credentials.");
+        }
+
+        btn.innerText = state.authMode === 'login' ? "Sign In" : "Register";
+        btn.disabled = false;
+        e.target.reset();
+    },
+
+    logout() {
+        localStorage.removeItem('fintrack_user');
+        state.user = null;
+        state.goals = [];
+        state.earnings = [];
+        state.loans = [];
+        this.showAuth();
     },
 
     switchTab(tabName) {
@@ -49,17 +172,28 @@ const app = {
         state.chartInstances = [];
     },
 
+    renderLoading() {
+        const mc = document.getElementById('app-content');
+        if (!mc) return;
+        mc.innerHTML = `
+            <div class="flex flex-col items-center justify-center" style="height: 60vh; color: var(--text-muted);">
+                <i data-lucide="loader" style="width: 48px; height: 48px; margin-bottom: 1rem; opacity: 0.5;" class="animate-spin"></i>
+                <h2>Loading Database...</h2>
+                <p style="font-size: 0.9rem; margin-top: 0.5rem;">Fetching live data from Google Sheets</p>
+            </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+    },
+
     render() {
+        if (state.isLoading) return;
+
         this.destroyCharts();
         const mainContent = document.getElementById('app-content');
         mainContent.innerHTML = '';
-
         mainContent.classList.add('animate-fade-in');
 
-        // Brief timeout to let the fade animation play on swap
-        setTimeout(() => {
-            mainContent.classList.remove('animate-fade-in');
-        }, 400);
+        setTimeout(() => { mainContent.classList.remove('animate-fade-in'); }, 400);
 
         if (state.currentTab === 'earnings') {
             mainContent.innerHTML = this.getEarningsHTML();
@@ -68,10 +202,7 @@ const app = {
             mainContent.innerHTML = this.getLoansHTML();
         }
 
-        // Re-initialize Lucide icons for dynamically injected content
-        if (window.lucide) {
-            window.lucide.createIcons();
-        }
+        if (window.lucide) window.lucide.createIcons();
     },
 
     // --- Formatters ---
@@ -93,17 +224,16 @@ const app = {
         const monthStr = this.getThisMonthStr();
 
         const totalEarned = state.earnings.filter(e => e.type === 'earn').reduce((acc, curr) => acc + curr.amount, 0);
-        const thisMonth = state.earnings.filter(e => e.type === 'earn' && e.date.startsWith(monthStr)).reduce((acc, curr) => acc + curr.amount, 0);
-        const today = state.earnings.filter(e => e.type === 'earn' && e.date === todayStr).reduce((acc, curr) => acc + curr.amount, 0);
+        const thisMonth = state.earnings.filter(e => e.type === 'earn' && String(e.date).startsWith(monthStr)).reduce((acc, curr) => acc + curr.amount, 0);
+        const today = state.earnings.filter(e => e.type === 'earn' && String(e.date).startsWith(todayStr)).reduce((acc, curr) => acc + curr.amount, 0);
 
-        // Generate Goal HTML logic mimicking React component maps
         const goalsHTML = state.goals.map(goal => {
             const p = Math.min((goal.current / goal.target) * 100, 100);
             const isExpanded = state.expandedGoalId === goal.id;
 
-            const goalActivity = state.earnings.filter(e => e.goalId === goal.id);
-            const earnsToday = goalActivity.filter(e => e.type === 'earn' && e.date === todayStr).reduce((acc, curr) => acc + curr.amount, 0);
-            const spendsToday = goalActivity.filter(e => e.type === 'spend' && e.date === todayStr).reduce((acc, curr) => acc + curr.amount, 0);
+            const goalActivity = state.earnings.filter(e => String(e.goalId) === String(goal.id));
+            const earnsToday = goalActivity.filter(e => e.type === 'earn' && String(e.date).startsWith(todayStr)).reduce((acc, curr) => acc + curr.amount, 0);
+            const spendsToday = goalActivity.filter(e => e.type === 'spend' && String(e.date).startsWith(todayStr)).reduce((acc, curr) => acc + curr.amount, 0);
             const netToday = earnsToday - spendsToday;
             const dailyP = Math.min((netToday / goal.target) * 100, 100);
 
@@ -122,7 +252,7 @@ const app = {
                         <div class="flex justify-between items-center mb-2" style="padding: 0.75rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px;">
                             <div class="flex items-center gap-3">
                                 <span class="badge ${badgeClass}">${entry.category}</span>
-                                <span class="text-muted" style="font-size: 0.8rem">${entry.date}</span>
+                                <span class="text-muted" style="font-size: 0.8rem">${String(entry.date).substring(0, 10)}</span>
                             </div>
                             <div style="font-weight: 600; ${listColorStyle}">${listSign}₹${this.formatCurrency(entry.amount)}</div>
                         </div>
@@ -258,20 +388,31 @@ const app = {
 
     // --- Chart JS Wrapper ---
     initEarningsCharts() {
-        // Line Chart Mock Data
         const lineCtx = document.getElementById('lineChart');
-        if (lineCtx) {
+        if (lineCtx && state.earnings.length > 0) {
             Chart.defaults.color = '#94a3b8';
             Chart.defaults.font.family = "'Outfit', sans-serif";
+
+            // Extract last 7 days from data logically
+            const dates = [...new Set(state.earnings.map(e => String(e.date).substring(0, 10)))].sort().slice(-7);
+            if (dates.length === 0) dates.push(this.getTodayStr());
+
+            const dailyData = dates.map(d => state.earnings.filter(e => e.type === 'earn' && String(e.date).startsWith(d)).reduce((acc, curr) => acc + curr.amount, 0));
+            const cumuData = [];
+            let rTotal = 0;
+            dates.forEach((d, i) => {
+                rTotal += dailyData[i];
+                cumuData.push(rTotal);
+            });
 
             state.chartInstances.push(new Chart(lineCtx, {
                 type: 'line',
                 data: {
-                    labels: ['22 Feb', '23 Feb', '24 Feb', '25 Feb', '26 Feb', '27 Feb'],
+                    labels: dates,
                     datasets: [
                         {
                             label: 'Cumulative',
-                            data: [500, 700, 700, 1500, 1800, 5300],
+                            data: cumuData,
                             borderColor: '#8b5cf6',
                             borderWidth: 3,
                             pointBackgroundColor: '#8b5cf6',
@@ -279,7 +420,7 @@ const app = {
                         },
                         {
                             label: 'Daily',
-                            data: [0, 200, 0, 800, 300, 3500],
+                            data: dailyData,
                             borderColor: '#10b981',
                             borderDash: [5, 5],
                             borderWidth: 2,
@@ -303,9 +444,8 @@ const app = {
             }));
         }
 
-        // Donut Chart logic mapped from custom category array
         const donutCtx = document.getElementById('donutChart');
-        if (donutCtx) {
+        if (donutCtx && state.earnings.length > 0) {
             const categoryTotals = state.earnings.filter(e => e.type === 'earn').reduce((acc, curr) => {
                 acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
                 return acc;
@@ -376,11 +516,11 @@ const app = {
                         </div>
                         <div>
                             <div class="text-muted mb-1" style="font-size: 0.75rem; text-transform: uppercase;">Start Date</div>
-                            <div style="font-weight: 500; color: var(--text-muted);">${loan.startDate || '-'}</div>
+                            <div style="font-weight: 500; color: var(--text-muted);">${String(loan.startDate).substring(0, 10) || '-'}</div>
                         </div>
                         <div>
                             <div class="text-muted mb-1" style="font-size: 0.75rem; text-transform: uppercase;">End Date</div>
-                            <div style="font-weight: 500; color: var(--text-muted);">${loan.endDate || '-'}</div>
+                            <div style="font-weight: 500; color: var(--text-muted);">${String(loan.endDate).substring(0, 10) || '-'}</div>
                         </div>
                     </div>
 
@@ -450,30 +590,40 @@ const app = {
         `;
     },
 
-    // --- State Mutations ---
+    // --- State Mutations (Async API Wrappers) ---
     toggleGoal(id) {
         state.expandedGoalId = state.expandedGoalId === id ? null : id;
         this.render();
     },
 
-    deleteGoal(id) {
-        if (confirm('Are you sure you want to delete this goal?')) {
-            state.goals = state.goals.filter(g => g.id !== id);
+    async deleteGoal(id) {
+        if (confirm('Are you sure you want to delete this goal from the database?')) {
+            this.setModalLoading(true, "Deleting...");
+            await api.sendAction('deleteGoal', { id: id });
+
+            // Reload full state to ensure sync
+            await api.fetchAllData();
+
             if (state.expandedGoalId === id) state.expandedGoalId = null;
+            this.setModalLoading(false);
             this.render();
         }
     },
 
-    deleteLoan(id) {
-        if (confirm('Delete this loan entirely?')) {
-            state.loans = state.loans.filter(l => l.id !== id);
+    async deleteLoan(id) {
+        if (confirm('Delete this loan entirely from the database?')) {
+            this.setModalLoading(true, "Deleting...");
+            await api.sendAction('deleteLoan', { id: id });
+            await api.fetchAllData();
+            this.setModalLoading(false);
             this.render();
         }
     },
 
-    submitEarning(e) {
+    async submitEarning(e) {
         e.preventDefault();
         const fd = new FormData(e.target);
+        this.setModalLoading(true, "Saving Earning...");
 
         const newEarn = {
             id: Date.now(),
@@ -486,45 +636,57 @@ const app = {
             type: 'earn'
         };
 
-        state.earnings.unshift(newEarn);
-
+        // If assigning to goal, we must also update the goal array entry concurrently
         if (newEarn.goalId) {
-            const goal = state.goals.find(g => g.id === newEarn.goalId);
-            if (goal) goal.current += newEarn.amount;
+            const goal = state.goals.find(g => String(g.id) === String(newEarn.goalId));
+            if (goal) {
+                goal.current += newEarn.amount;
+                await api.sendAction('updateGoal', goal);
+            }
         }
 
+        await api.sendAction('addEarning', newEarn);
+        await api.fetchAllData();
+
+        this.setModalLoading(false);
         this.closeModal();
         this.render();
     },
 
-    submitGoal(e) {
+    async submitGoal(e) {
         e.preventDefault();
         const fd = new FormData(e.target);
+        this.setModalLoading(true, "Creating Goal...");
 
-        state.goals.push({
+        const newGoal = {
             id: Date.now(),
             name: fd.get('name'),
             target: parseFloat(fd.get('target')),
             current: 0,
             deadline: ''
-        });
+        };
 
+        await api.sendAction('addGoal', newGoal);
+        await api.fetchAllData();
+
+        this.setModalLoading(false);
         this.closeModal();
         this.render();
     },
 
-    submitWithdrawal(e) {
+    async submitWithdrawal(e) {
         e.preventDefault();
         const fd = new FormData(e.target);
         const amountStr = fd.get('amount');
         const goalIdStr = fd.get('goalId');
 
         if (!amountStr || !goalIdStr) return;
+        this.setModalLoading(true, "Logging Withdrawal...");
 
         const amt = parseFloat(amountStr);
         const goalIdInt = parseInt(goalIdStr);
 
-        state.earnings.unshift({
+        const newSpend = {
             id: Date.now(),
             source: fd.get('reason'),
             category: 'Spend',
@@ -533,21 +695,30 @@ const app = {
             date: this.getTodayStr(),
             goalId: goalIdInt,
             type: 'spend'
-        });
+        };
 
-        const goal = state.goals.find(g => g.id === goalIdInt);
-        if (goal) goal.current = Math.max(0, goal.current - amt);
+        const goal = state.goals.find(g => String(g.id) === String(goalIdInt));
+        if (goal) {
+            goal.current = Math.max(0, goal.current - amt);
+            await api.sendAction('updateGoal', goal);
+        }
 
+        await api.sendAction('addEarning', newSpend);
+        await api.fetchAllData();
+
+        this.setModalLoading(false);
         this.closeModal();
         this.render();
     },
 
-    submitLoan(e) {
+    async submitLoan(e) {
         e.preventDefault();
         const fd = new FormData(e.target);
         const prin = parseFloat(fd.get('principal')) || 0;
 
-        state.loans.push({
+        this.setModalLoading(true, "Creating Loan...");
+
+        const newLoan = {
             id: Date.now(),
             source: fd.get('source') || 'Unnamed Loan',
             principal: prin,
@@ -557,24 +728,37 @@ const app = {
             endDate: fd.get('endDate') || '',
             totalPaid: 0,
             remainingBalance: prin
-        });
+        };
 
+        await api.sendAction('addLoan', newLoan);
+        await api.fetchAllData();
+
+        this.setModalLoading(false);
         this.closeModal();
         this.render();
     },
 
-    submitEmi(e, id) {
+    async submitEmi(e, id) {
         e.preventDefault();
         const amt = parseFloat(new FormData(e.target).get('amount'));
-        const loan = state.loans.find(l => l.id === id);
+        const loan = state.loans.find(l => String(l.id) === String(id));
+
         if (loan && amt) {
+            this.setModalLoading(true, "Logging EMI...");
+
             const mRate = (loan.interestRate / 100) / 12;
             const iComp = loan.remainingBalance * mRate;
             const pComp = amt - iComp;
 
             loan.totalPaid += amt;
             loan.remainingBalance = Math.max(0, loan.remainingBalance - pComp);
+
+            await api.sendAction('updateLoan', loan);
+            await api.fetchAllData();
+
+            this.setModalLoading(false);
         }
+
         this.closeModal();
         this.render();
     },
@@ -585,11 +769,18 @@ const app = {
         const content = document.getElementById('dynamic-modal');
 
         content.innerHTML = `
-            <div class="modal-header">
-                <h3>${title}</h3>
-                <button class="btn-icon muted" onclick="app.closeModal()"><i data-lucide="x" style="width: 20px;"></i></button>
+            <div id="modal-content-wrap">
+                <div class="modal-header">
+                    <h3>${title}</h3>
+                    <button class="btn-icon muted" onclick="app.closeModal()"><i data-lucide="x" style="width: 20px;"></i></button>
+                </div>
+                ${formHTML}
             </div>
-            ${formHTML}
+            <!-- Loading Indicator -->
+            <div id="modal-loading-wrap" class="hidden flex-col items-center justify-center p-6 text-muted">
+                <i data-lucide="loader" style="width: 32px; height: 32px; margin-bottom: 1rem;" class="animate-spin"></i>
+                <span id="modal-loading-text">Saving...</span>
+            </div>
         `;
 
         container.classList.remove('hidden');
@@ -598,6 +789,25 @@ const app = {
 
     closeModal() {
         document.getElementById('modal-container').classList.add('hidden');
+    },
+
+    setModalLoading(isLoading, text = "Loading...") {
+        const cw = document.getElementById('modal-content-wrap');
+        const lw = document.getElementById('modal-loading-wrap');
+        const lt = document.getElementById('modal-loading-text');
+
+        if (!cw) return; // If called from non-modal like Delete
+
+        if (isLoading) {
+            cw.classList.add('hidden');
+            lw.classList.remove('hidden');
+            lw.classList.add('flex');
+            lt.innerText = text;
+        } else {
+            cw.classList.remove('hidden');
+            lw.classList.add('hidden');
+            lw.classList.remove('flex');
+        }
     },
 
     openEarningModal() {
