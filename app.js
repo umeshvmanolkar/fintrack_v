@@ -78,13 +78,22 @@ const api = {
 // --- Core App Management ---
 const app = {
     async init() {
-        // Attempt to restore session
         const storedUser = localStorage.getItem('fintrack_user');
+        const isDashboardPage = window.location.pathname.includes('dashboard.html');
+
         if (storedUser) {
             state.user = JSON.parse(storedUser);
-            this.showDashboard();
+            if (!isDashboardPage) {
+                window.location.href = 'dashboard.html';
+            } else {
+                this.loadDashboardData();
+            }
         } else {
-            this.showAuth();
+            if (isDashboardPage) {
+                window.location.href = 'index.html';
+            } else {
+                if (window.lucide) window.lucide.createIcons();
+            }
         }
     },
 
@@ -96,15 +105,11 @@ const app = {
     },
 
     showAuth() {
-        document.getElementById('auth-container').classList.remove('hidden');
-        document.getElementById('dashboard-container').classList.add('hidden');
-        if (window.lucide) window.lucide.createIcons();
+        window.location.href = 'index.html';
     },
 
     showDashboard() {
-        document.getElementById('auth-container').classList.add('hidden');
-        document.getElementById('dashboard-container').classList.remove('hidden');
-        this.loadDashboardData();
+        window.location.href = 'dashboard.html';
     },
 
     // --- Authentication Logic ---
@@ -154,10 +159,7 @@ const app = {
     logout() {
         localStorage.removeItem('fintrack_user');
         state.user = null;
-        state.goals = [];
-        state.earnings = [];
-        state.loans = [];
-        this.showAuth();
+        window.location.href = 'index.html';
     },
 
     switchTab(tabName) {
