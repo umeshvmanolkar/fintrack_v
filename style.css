@@ -596,6 +596,30 @@ h3 {
     width: 100%;
 }
 
+/* Authentication Screen - Solid background to hide dashboard */
+.auth-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-dark);
+    background-image:
+        radial-gradient(circle at 50% 10%, rgba(139, 92, 246, 0.15), transparent 40%),
+        radial-gradient(circle at 50% 90%, rgba(244, 63, 94, 0.15), transparent 40%);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 2.5rem;
+}
+
+.hidden {
+    display: none !important;
+}
+
 .animate-fade-in {
     animation: fadeIn 0.4s ease forwards;
 }
